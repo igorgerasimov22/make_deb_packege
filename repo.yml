@@ -1,0 +1,67 @@
+---
+- name: Create and host a local Debian repository
+  hosts: localhost
+  become: yes
+  vars:
+    repo_dir: "/var/www/html/debian-repo"
+    deb_package_path: "/tmp/nginx-deb/nginx_1.24.0-custom_amd64.deb"  # Путь к собранному deb-пакету
+    repo_url: "http://localhost/debian-repo"
+  tasks:
+    - name: Install required packages
+      apt:
+        name:
+          - nginx
+          - dpkg-dev
+        state: present
+
+    - name: Create repository directory
+      file:
+        path: "{{ repo_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Copy deb package to repository directory
+      copy:
+        src: "{{ deb_package_path }}"
+        dest: "{{ repo_dir }}/"
+
+    - name: Create Packages.gz file for the repository
+      command: dpkg-scanpackages . | gzip -c > Packages.gz
+      args:
+        chdir: "{{ repo_dir }}"
+
+    - name: Configure Nginx to serve the repository
+      block:
+        - name: Create Nginx configuration file for the repository
+          copy:
+            dest: "/etc/nginx/sites-available/debian-repo"
+            content: |
+              server {
+                  listen 80;
+                  server_name localhost;
+
+                  location /debian-repo {
+                      root /var/www/html;
+                      autoindex on;
+                  }
+              }
+
+        - name: Enable Nginx configuration
+          file:
+            src: "/etc/nginx/sites-available/debian-repo"
+            dest: "/etc/nginx/sites-enabled/debian-repo"
+            state: link
+
+        - name: Remove default Nginx configuration
+          file:
+            path: "/etc/nginx/sites-enabled/default"
+            state: absent
+
+        - name: Restart Nginx to apply changes
+          service:
+            name: nginx
+            state: restarted
+
+    - name: Display repository URL
+      debug:
+        msg: "Your Debian repository is available at {{ repo_url }}"

@@ -1,0 +1,94 @@
+---
+- name: Build and package Nginx with ngx_brotli
+  hosts: localhost
+  become: yes
+  vars:
+    nginx_version: "1.24.0"  # Задайте нужную версию Nginx
+    build_dir: "/tmp/nginx-build"
+    output_dir: "/tmp/nginx-deb"
+  tasks:
+    - name: Install required packages
+      apt:
+        name:
+          - build-essential
+          - dpkg-dev
+          - libpcre3
+          - libpcre3-dev
+          - zlib1g
+          - zlib1g-dev
+          - libssl-dev
+          - git
+          - curl
+        state: present
+
+    - name: Create build and output directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      with_items:
+        - "{{ build_dir }}"
+        - "{{ output_dir }}"
+
+    - name: Download Nginx source code
+      get_url:
+        url: "http://nginx.org/download/nginx-{{ nginx_version }}.tar.gz"
+        dest: "{{ build_dir }}/nginx-{{ nginx_version }}.tar.gz"
+
+    - name: Extract Nginx source code
+      unarchive:
+        src: "{{ build_dir }}/nginx-{{ nginx_version }}.tar.gz"
+        dest: "{{ build_dir }}"
+        remote_src: yes
+
+    - name: Clone ngx_brotli repository
+      git:
+        repo: "https://github.com/google/ngx_brotli.git"
+        dest: "{{ build_dir }}/ngx_brotli"
+        version: main
+
+    - name: Initialize ngx_brotli submodules
+      command: git submodule update --init --recursive
+      args:
+        chdir: "{{ build_dir }}/ngx_brotli"
+
+    - name: Configure Nginx with ngx_brotli
+      command: >
+        ./configure
+        --with-compat
+        --add-dynamic-module={{ build_dir }}/ngx_brotli
+        --prefix=/etc/nginx
+        --sbin-path=/usr/sbin/nginx
+        --modules-path=/usr/lib/nginx/modules
+        --conf-path=/etc/nginx/nginx.conf
+        --pid-path=/var/run/nginx.pid
+        --lock-path=/var/lock/nginx.lock
+        --http-log-path=/var/log/nginx/access.log
+        --error-log-path=/var/log/nginx/error.log
+        --with-http_ssl_module
+        --with-http_v2_module
+        --with-http_gzip_static_module
+        --with-stream
+        --with-stream_ssl_module
+      args:
+        chdir: "{{ build_dir }}/nginx-{{ nginx_version }}"
+
+    - name: Compile Nginx
+      make:
+        chdir: "{{ build_dir }}/nginx-{{ nginx_version }}"
+
+    - name: Build deb package
+      command: >
+        checkinstall
+        --install=no
+        --pkgname=nginx
+        --pkgversion={{ nginx_version }}
+        --pkgrelease=custom
+        --default
+        --pakdir={{ output_dir }}
+      args:
+        chdir: "{{ build_dir }}/nginx-{{ nginx_version }}"
+
+    - name: Display location of the built deb package
+      debug:
+        msg: "Nginx deb package built at {{ output_dir }}"
